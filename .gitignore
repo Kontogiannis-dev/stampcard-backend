@@ -1,0 +1,8 @@
+.venv/
+.idea/
+.env
+*.pem
+stampcard.db
+__pycache__/
+*.pyc
+service-account.json
