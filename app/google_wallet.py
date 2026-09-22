@@ -22,6 +22,11 @@ WALLET_ENABLED = bool(ISSUER_ID) and os.path.exists(SERVICE_ACCOUNT_FILE)
 
 CLASS_ID = f"{ISSUER_ID}.stampcard_class" if ISSUER_ID else None
 
+print(f"ISSUER_ID: '{ISSUER_ID}'")
+print(f"SERVICE_ACCOUNT_FILE: {SERVICE_ACCOUNT_FILE}")
+print(f"File exists: {os.path.exists(SERVICE_ACCOUNT_FILE)}")
+print(f"WALLET_ENABLED: {WALLET_ENABLED}")
+
 if WALLET_ENABLED:
     from google.oauth2 import service_account
     from google.auth.transport.requests import AuthorizedSession
@@ -35,19 +40,41 @@ if WALLET_ENABLED:
 
 
 def ensure_loyalty_class(shop_name: str, stamps_required: int):
-    """Creates the 'template' for the loyalty card (once per shop). Safe to call repeatedly."""
+    """Creates the 'template' for the loyalty card (once per shop), or updates it if it already exists."""
     if not WALLET_ENABLED:
         return None
 
     class_payload = {
         "id": CLASS_ID,
-        "issuerName": shop_name,
-        "programName": f"{shop_name} Loyalty Card",
+        "issuerName": "MFS",
+        "programName": "MFS",
         "reviewStatus": "UNDER_REVIEW",
+        "hexBackgroundColor": "#cfa588",
+        "programLogo": {
+            "sourceUri": {
+                "uri": "https://placehold.co/300x300/7a4a2e/f2e2d3?text=MFS"
+            },
+            "contentDescription": {
+                "defaultValue": {
+                    "language": "en-US",
+                    "value": f"{shop_name} logo"
+                }
+            }
+        }
     }
+
     resp = session.post(f"{BASE_URL}/loyaltyClass", json=class_payload)
-    if resp.status_code not in (200, 409):  # 409 = already exists, that's fine
-        print("Warning creating wallet class:", resp.text)
+    if resp.status_code == 200:
+        return CLASS_ID
+
+    if resp.status_code == 409:
+        # Already exists — update it with the current payload instead
+        update_resp = session.put(f"{BASE_URL}/loyaltyClass/{CLASS_ID}", json=class_payload)
+        if update_resp.status_code not in (200,):
+            print("Warning updating wallet class:", update_resp.status_code, update_resp.text)
+    else:
+        print("Warning creating wallet class:", resp.status_code, resp.text)
+
     return CLASS_ID
 
 
@@ -61,6 +88,8 @@ def create_or_update_pass(customer_identifier: str, shop_name: str, stamp_count:
         # Mock mode: return a fake link so the rest of the flow can be tested end-to-end
         return f"MOCK_WALLET_LINK_for_{customer_identifier}_stamps_{stamp_count}"
 
+    ensure_loyalty_class(shop_name, stamps_required)
+
     object_id = f"{ISSUER_ID}.{customer_identifier}"
 
     points_remaining = max(stamps_required - stamp_count, 0)
@@ -73,6 +102,11 @@ def create_or_update_pass(customer_identifier: str, shop_name: str, stamp_count:
         "loyaltyPoints": {
             "label": "Stamps",
             "balance": {"int": stamp_count},
+        },
+        "barcode": {
+            "type": "QR_CODE",
+            "value": customer_identifier,
+            "alternateText": customer_identifier
         },
         "textModulesData": [
             {
@@ -88,12 +122,19 @@ def create_or_update_pass(customer_identifier: str, shop_name: str, stamp_count:
 
     resp = session.get(f"{BASE_URL}/loyaltyObject/{object_id}")
     if resp.status_code == 200:
-        session.put(f"{BASE_URL}/loyaltyObject/{object_id}", json=object_payload)
+        update_resp = session.put(f"{BASE_URL}/loyaltyObject/{object_id}", json=object_payload)
+        if update_resp.status_code not in (200,):
+            print("Error updating wallet object:", update_resp.status_code, update_resp.text)
     else:
-        session.post(f"{BASE_URL}/loyaltyObject", json=object_payload)
+        create_resp = session.post(f"{BASE_URL}/loyaltyObject", json=object_payload)
+        if create_resp.status_code not in (200,):
+            print("Error creating wallet object:", create_resp.status_code, create_resp.text)
 
     # Build the "Add/View in Google Wallet" JWT link
-    import jwt  # PyJWT, only needed here
+    import jwt
+
+    with open(SERVICE_ACCOUNT_FILE) as f:
+        service_account_info = json.load(f)
 
     claims = {
         "iss": credentials.service_account_email,
@@ -102,5 +143,6 @@ def create_or_update_pass(customer_identifier: str, shop_name: str, stamp_count:
         "iat": int(time.time()),
         "payload": {"loyaltyObjects": [{"id": object_id}]},
     }
-    signed_jwt = jwt.encode(claims, credentials.signer, algorithm="RS256")
+    signed_jwt = jwt.encode(claims, service_account_info["private_key"], algorithm="RS256")
     return f"https://pay.google.com/gp/v/save/{signed_jwt}"
+

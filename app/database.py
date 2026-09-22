@@ -40,7 +40,9 @@ class Customer(Base):
     id = Column(Integer, primary_key=True, index=True)
     shop_id = Column(Integer, ForeignKey("shops.id"))
     identifier = Column(String, unique=True, index=True)  # random token, used in the QR/pass URL
-    name = Column(String, nullable=True)  # optional, can be filled in later
+    first_name = Column(String, nullable=False)
+    last_name = Column(String, nullable=False)
+    phone_number = Column(String, nullable=False, index=True)  # indexed: this becomes our lookup key
     stamp_count = Column(Integer, default=0)
     reward_ready = Column(Boolean, default=False)
     redeem_code = Column(String, nullable=True)
