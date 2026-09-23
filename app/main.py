@@ -22,6 +22,7 @@ from app.database import init_db, get_db, Shop, Customer
 from app import google_wallet
 
 SECRET_KEY = os.environ.get("SECRET_KEY")
+HOST_IP = os.environ.get("HOST_IP")
 
 app = FastAPI(title="Stamp Card")
 
@@ -30,12 +31,12 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://localhost:5174",
-        "http://192.168.1.148:5173",
-        "http://192.168.1.148:5174",
+        f"http://{HOST_IP}:5173",
+        f"http://{HOST_IP}:5174",
         "https://localhost:5173",
         "https://localhost:5174",
-        "https://192.168.1.148:5173",
-        "https://192.168.1.148:5174",
+        f"https://{HOST_IP}:5173",
+        f"https://{HOST_IP}:5174",
     ],
     allow_methods=["*"],
     allow_headers=["*"],
@@ -68,7 +69,7 @@ def join_shop(shop_id: int, db: Session = Depends(get_db)):
     if not shop:
         raise HTTPException(404, "Shop not found")
 
-    return RedirectResponse(f"https://192.168.1.148:5174/onboard/{shop_id}")
+    return RedirectResponse(f"https://{HOST_IP}:5174/onboard/{shop_id}")
 
 
 @app.post("/api/onboard/{shop_id}")
@@ -203,19 +204,27 @@ def add_stamp(shop_id: int, identifier: str = Form(...), db: Session = Depends(g
     if not customer:
         raise HTTPException(404, "Customer not found")
 
-    if customer.stamp_count < shop.stamps_required:
-        customer.stamp_count += 1
-        if customer.stamp_count >= shop.stamps_required:
-            customer.reward_ready = True
+    if customer.stamp_count >= shop.stamps_required:
+        customer.stamp_count = 0
+        customer.reward_ready = False
+        customer.reward_redeemed_count += 1
+        db.commit()
+        google_wallet.create_or_update_pass(
+    customer.identifier, shop.name, customer.stamp_count,
+    shop.stamps_required, shop.reward_description
+)
+        return {"action": "redeemed", "reward_description": shop.reward_description}
+
+    customer.stamp_count += 1
+    if customer.stamp_count >= shop.stamps_required:
+        customer.reward_ready = True
     db.commit()
-
-    # Push the live update to their wallet pass
     google_wallet.create_or_update_pass(
-        customer.identifier, shop.name, customer.stamp_count,
-        shop.stamps_required, shop.reward_description
-    )
+    customer.identifier, shop.name, customer.stamp_count,
+    shop.stamps_required, shop.reward_description
+)
+    return {"action": "stamped", "stamp_count": customer.stamp_count, "stamps_required": shop.stamps_required}
 
-    return {"success": True}
 
 
 @app.post("/owner/{shop_id}/verify-code")
@@ -281,7 +290,7 @@ def get_customers(shop_id: int, token_shop_id: int = Depends(verify_owner_token)
 # ---------- QR CODE GENERATION ----------
 
 @app.get("/qr/{shop_id}")
-def get_qr_code(shop_id: int, request_base_url: str = "https://192.168.1.148:8000"):
+def get_qr_code(shop_id: int, request_base_url: str = f"https://{HOST_IP}:8000"):
     import qrcode
     import io
     from fastapi.responses import StreamingResponse
