@@ -11,10 +11,15 @@ import uuid
 
 import jwt
 from dotenv import load_dotenv
-from fastapi import FastAPI, Depends, HTTPException, Form, Header
+from fastapi import FastAPI, Depends, HTTPException, Form, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
 
 load_dotenv()
 
@@ -25,6 +30,15 @@ SECRET_KEY = os.environ.get("SECRET_KEY")
 HOST_IP = os.environ.get("HOST_IP")
 
 app = FastAPI(title="Stamp Card")
+
+def get_client_ip(request: Request) -> str:
+    # Behind Cloudflare Tunnel, the real client IP arrives in this header
+    return request.headers.get("CF-Connecting-IP") or get_remote_address(request)
+
+
+limiter = Limiter(key_func=get_client_ip)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -159,7 +173,8 @@ def get_wallet_link(identifier: str, db: Session = Depends(get_db)):
 # ---------- OWNER AUTH ----------
 
 @app.post("/owner/login")
-def owner_login(shop_id: int = Form(...), pin: str = Form(...), db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+def owner_login(request: Request, shop_id: int = Form(...), pin: str = Form(...), db: Session = Depends(get_db)):
     """Checks the shop's PIN and, if correct, issues a signed JWT the owner app
     uses for every subsequent request instead of resending the raw PIN."""
     shop = db.query(Shop).get(shop_id)

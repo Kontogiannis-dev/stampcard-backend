@@ -30,3 +30,4 @@ typing_extensions==4.16.0
 urllib3==2.8.0
 uvicorn==0.52.4
 psycopg2-binary
+slowapi
