@@ -53,6 +53,7 @@ class Customer(Base):
     redeem_code = Column(String, nullable=True)
     redeem_code_used = Column(Boolean, default=False)
     reward_redeemed_count = Column(Integer, default=0)
+    last_stamped_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     # Google Wallet object ID, filled in once a pass is issued (needed to push live updates)

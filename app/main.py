@@ -15,6 +15,7 @@ from fastapi import FastAPI, Depends, HTTPException, Form, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
+from datetime import datetime
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi import _rate_limit_exceeded_handler
@@ -219,10 +220,16 @@ def add_stamp(shop_id: int, identifier: str = Form(...), db: Session = Depends(g
     if not customer:
         raise HTTPException(404, "Customer not found")
 
+    if customer.last_stamped_at is not None:
+        seconds_since = (datetime.utcnow() - customer.last_stamped_at).total_seconds()
+        if seconds_since < 10:
+            raise HTTPException(429, "Card was just stamped")
+
     if customer.stamp_count >= shop.stamps_required:
         customer.stamp_count = 0
         customer.reward_ready = False
         customer.reward_redeemed_count += 1
+        customer.last_stamped_at = datetime.utcnow()
         db.commit()
         google_wallet.create_or_update_pass(
     customer.identifier, shop.name, customer.stamp_count,
@@ -233,6 +240,7 @@ def add_stamp(shop_id: int, identifier: str = Form(...), db: Session = Depends(g
     customer.stamp_count += 1
     if customer.stamp_count >= shop.stamps_required:
         customer.reward_ready = True
+    customer.last_stamped_at = datetime.utcnow()
     db.commit()
     google_wallet.create_or_update_pass(
     customer.identifier, shop.name, customer.stamp_count,
