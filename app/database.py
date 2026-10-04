@@ -6,10 +6,15 @@ Using SQLite for now — easy to start, swap to Postgres later with zero code ch
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from datetime import datetime
+import os
 
-DATABASE_URL = "sqlite:///./stampcard.db"
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./stampcard.db")
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+connect_args = {}
+if DATABASE_URL.startswith("sqlite"):
+    connect_args = {"check_same_thread": False}
+
+engine = create_engine(DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
