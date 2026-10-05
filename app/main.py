@@ -11,7 +11,7 @@ import uuid
 
 import jwt
 from dotenv import load_dotenv
-from fastapi import FastAPI, Depends, HTTPException, Form, Header, Request
+from fastapi import FastAPI, Depends, HTTPException, Form, Header, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.orm import Session
@@ -207,10 +207,19 @@ def verify_owner_token(authorization: str = Header(...)):
     return payload["shop_id"]
 
 
+def sync_wallet_pass(identifier, shop_name, stamp_count, stamps_required, reward_description):
+    try:
+        google_wallet.create_or_update_pass(
+            identifier, shop_name, stamp_count,
+            stamps_required, reward_description
+        )
+    except Exception as e:
+        print(f"Wallet sync failed for {identifier}: {e}")
+
 # ---------- OWNER FLOW (all routes below require a valid owner token) ----------
 
 @app.post("/owner/{shop_id}/stamp")
-def add_stamp(shop_id: int, identifier: str = Form(...), db: Session = Depends(get_db),
+def add_stamp(background_tasks: BackgroundTasks, shop_id: int, identifier: str = Form(...), db: Session = Depends(get_db),
                token_shop_id: int = Depends(verify_owner_token)):
     if token_shop_id != shop_id:
         raise HTTPException(403, "Not authorized for this shop")
@@ -231,10 +240,11 @@ def add_stamp(shop_id: int, identifier: str = Form(...), db: Session = Depends(g
         customer.reward_redeemed_count += 1
         customer.last_stamped_at = datetime.utcnow()
         db.commit()
-        google_wallet.create_or_update_pass(
-    customer.identifier, shop.name, customer.stamp_count,
-    shop.stamps_required, shop.reward_description
-)
+        background_tasks.add_task(
+            sync_wallet_pass,
+            customer.identifier, shop.name, customer.stamp_count,
+            shop.stamps_required, shop.reward_description
+        )
         return {"action": "redeemed", "reward_description": shop.reward_description}
 
     customer.stamp_count += 1
@@ -242,10 +252,11 @@ def add_stamp(shop_id: int, identifier: str = Form(...), db: Session = Depends(g
         customer.reward_ready = True
     customer.last_stamped_at = datetime.utcnow()
     db.commit()
-    google_wallet.create_or_update_pass(
-    customer.identifier, shop.name, customer.stamp_count,
-    shop.stamps_required, shop.reward_description
-)
+    background_tasks.add_task(
+        sync_wallet_pass,
+        customer.identifier, shop.name, customer.stamp_count,
+        shop.stamps_required, shop.reward_description
+    )
     return {"action": "stamped", "stamp_count": customer.stamp_count, "stamps_required": shop.stamps_required}
 
 
