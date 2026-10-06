@@ -8,6 +8,7 @@ or http://localhost:8000/join/1 to simulate a customer scanning the shop's QR co
 import os
 import time
 import uuid
+import bcrypt
 
 import jwt
 from dotenv import load_dotenv
@@ -57,7 +58,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+def hash_pin(pin: str) -> str:
+    return bcrypt.hashpw(pin.encode(), bcrypt.gensalt()).decode()
 
+
+def check_pin(pin: str, stored_hash: str) -> bool:
+    return bcrypt.checkpw(pin.encode(), stored_hash.encode())
 
 @app.on_event("startup")
 def seed_shop():
@@ -65,7 +71,7 @@ def seed_shop():
     db = next(get_db())
     if not db.query(Shop).first():
         shop = Shop(name="My Test Cafe", reward_description="1 Free Coffee",
-                    stamps_required=10, owner_pin=os.environ.get("OWNER_PIN"))
+                    stamps_required=10, owner_pin=hash_pin(os.environ.get("OWNER_PIN")))
         db.add(shop)
         db.commit()
         print(f"Created test shop with id={shop.id}")
@@ -178,7 +184,7 @@ def owner_login(request: Request, shop_id: int = Form(...), pin: str = Form(...)
     """Checks the shop's PIN and, if correct, issues a signed JWT the owner app
     uses for every subsequent request instead of resending the raw PIN."""
     shop = db.query(Shop).get(shop_id)
-    if not shop or pin != shop.owner_pin:
+    if not shop or not check_pin(pin, shop.owner_pin):
         raise HTTPException(403, "Wrong PIN")
 
     claims = {
