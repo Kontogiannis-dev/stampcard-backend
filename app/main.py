@@ -24,7 +24,7 @@ from slowapi.errors import RateLimitExceeded
 
 load_dotenv()
 
-from app.database import init_db, get_db, Shop, Customer
+from app.database import get_db, Shop, Customer
 from app import google_wallet
 
 SECRET_KEY = os.environ.get("SECRET_KEY")
@@ -57,7 +57,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-init_db()
 
 
 @app.on_event("startup")
