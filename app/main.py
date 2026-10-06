@@ -9,6 +9,7 @@ import os
 import time
 import uuid
 import bcrypt
+from contextlib import asynccontextmanager
 
 import jwt
 from dotenv import load_dotenv
@@ -31,7 +32,21 @@ from app import google_wallet
 SECRET_KEY = os.environ.get("SECRET_KEY")
 HOST_IP = os.environ.get("HOST_IP")
 
-app = FastAPI(title="Stamp Card")
+def seed_shop():
+    """Creates your one test shop automatically the first time you run this."""
+    db = next(get_db())
+    if not db.query(Shop).first():
+        shop = Shop(name="My Test Cafe", reward_description="1 Free Coffee",
+                    stamps_required=10, owner_pin=hash_pin(os.environ.get("OWNER_PIN")))
+        db.add(shop)
+        db.commit()
+        print(f"Created test shop with id={shop.id}")
+
+@asynccontextmanager
+async def lifespan(app):
+    seed_shop()
+    yield
+app = FastAPI(title="Stamp Card", lifespan=lifespan)
 
 def get_client_ip(request: Request) -> str:
     # Behind Cloudflare Tunnel, the real client IP arrives in this header
@@ -65,16 +80,7 @@ def hash_pin(pin: str) -> str:
 def check_pin(pin: str, stored_hash: str) -> bool:
     return bcrypt.checkpw(pin.encode(), stored_hash.encode())
 
-@app.on_event("startup")
-def seed_shop():
-    """Creates your one test shop automatically the first time you run this."""
-    db = next(get_db())
-    if not db.query(Shop).first():
-        shop = Shop(name="My Test Cafe", reward_description="1 Free Coffee",
-                    stamps_required=10, owner_pin=hash_pin(os.environ.get("OWNER_PIN")))
-        db.add(shop)
-        db.commit()
-        print(f"Created test shop with id={shop.id}")
+
 
 
 # ---------- CUSTOMER FLOW ----------
@@ -85,7 +91,7 @@ def join_shop(shop_id: int, db: Session = Depends(get_db)):
     This is what the QR code / NFC tag on the counter points to.
     Sends the customer to the onboarding form — no Customer record yet.
     """
-    shop = db.query(Shop).get(shop_id)
+    shop = db.get(Shop, shop_id)
     if not shop:
         raise HTTPException(404, "Shop not found")
 
@@ -102,7 +108,7 @@ def onboard_customer(
 ):
     """Creates the Customer record once the onboarding form is submitted,
     or returns the existing card if this phone number already joined this shop."""
-    shop = db.query(Shop).get(shop_id)
+    shop = db.get(Shop, shop_id)
     if not shop:
         raise HTTPException(404, "Shop not found")
 
@@ -183,7 +189,7 @@ def get_wallet_link(identifier: str, db: Session = Depends(get_db)):
 def owner_login(request: Request, shop_id: int = Form(...), pin: str = Form(...), db: Session = Depends(get_db)):
     """Checks the shop's PIN and, if correct, issues a signed JWT the owner app
     uses for every subsequent request instead of resending the raw PIN."""
-    shop = db.query(Shop).get(shop_id)
+    shop = db.get(Shop, shop_id)
     if not shop or not check_pin(pin, shop.owner_pin):
         raise HTTPException(403, "Wrong PIN")
 
@@ -228,7 +234,7 @@ def add_stamp(background_tasks: BackgroundTasks, shop_id: int, identifier: str =
                token_shop_id: int = Depends(verify_owner_token)):
     if token_shop_id != shop_id:
         raise HTTPException(403, "Not authorized for this shop")
-    shop = db.query(Shop).get(shop_id)
+    shop = db.get(Shop, shop_id)
 
     customer = db.query(Customer).filter(Customer.identifier == identifier).first()
     if not customer:
@@ -309,7 +315,7 @@ def set_customer_name(shop_id: int, token_shop_id: int = Depends(verify_owner_to
 @app.get("/api/owner/{shop_id}/customers")
 def get_customers(shop_id: int, token_shop_id: int = Depends(verify_owner_token),
                    db: Session = Depends(get_db)):
-    shop = db.query(Shop).get(shop_id)
+    shop = db.get(Shop, shop_id)
     if token_shop_id != shop_id:
         raise HTTPException(403, "Not authorized for this shop")
 
