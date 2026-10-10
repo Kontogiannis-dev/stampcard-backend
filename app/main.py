@@ -134,37 +134,6 @@ def onboard_customer(
     return {"identifier": customer.identifier}
 
 
-@app.get("/api/card/{identifier}")
-def get_card_data(identifier: str, db: Session = Depends(get_db)):
-    customer = db.query(Customer).filter(Customer.identifier == identifier).first()
-    if not customer:
-        raise HTTPException(404, "Card not found")
-    shop = customer.shop
-    return {
-        "shop_name": shop.name,
-        "first_name": customer.first_name,
-        "last_name": customer.last_name,
-        "stamp_count": customer.stamp_count,
-        "stamps_required": shop.stamps_required,
-        "reward_description": shop.reward_description,
-        "active_redeem_code": customer.redeem_code if not customer.redeem_code_used else None
-    }
-
-
-@app.post("/api/card/{identifier}/generate-code")
-def generate_redeem_code(identifier: str, db: Session = Depends(get_db)):
-    customer = db.query(Customer).filter(Customer.identifier == identifier).first()
-    if not customer or customer.stamp_count < customer.shop.stamps_required:
-        raise HTTPException(400, "Reward not ready")
-
-    code = str(uuid.uuid4())[:6].upper()
-    customer.redeem_code = code
-    customer.redeem_code_used = False
-    db.commit()
-
-    return {"code": code}
-
-
 @app.get("/api/card/{identifier}/wallet-link")
 def get_wallet_link(identifier: str, db: Session = Depends(get_db)):
     customer = db.query(Customer).filter(Customer.identifier == identifier).first()
@@ -271,45 +240,6 @@ def add_stamp(background_tasks: BackgroundTasks, shop_id: int, identifier: str =
     return {"action": "stamped", "stamp_count": customer.stamp_count, "stamps_required": shop.stamps_required}
 
 
-
-@app.post("/owner/{shop_id}/verify-code")
-def verify_redeem_code(shop_id: int, token_shop_id: int = Depends(verify_owner_token),
-                        code: str = Form(...), db: Session = Depends(get_db)):
-    if token_shop_id != shop_id:
-        raise HTTPException(403, "Not authorized for this shop")
-    customer = db.query(Customer).filter(
-        Customer.redeem_code == code,
-        Customer.redeem_code_used == False
-    ).first()
-
-    if not customer:
-        raise HTTPException(400, "Invalid or already-used code")
-
-    customer.stamp_count = 0
-    customer.redeem_code_used = True
-    customer.reward_ready = False
-    customer.reward_redeemed_count += 1
-    db.commit()
-
-    return {"success": True}
-
-
-@app.post("/owner/{shop_id}/set-name")
-def set_customer_name(shop_id: int, token_shop_id: int = Depends(verify_owner_token),
-                       identifier: str = Form(...), first_name: str = Form(...),
-                       last_name: str = Form(...), db: Session = Depends(get_db)):
-    if token_shop_id != shop_id:
-        raise HTTPException(403, "Not authorized for this shop")
-
-    customer = db.query(Customer).filter(Customer.identifier == identifier).first()
-    if not customer:
-        raise HTTPException(404, "Customer not found")
-
-    customer.first_name = first_name
-    customer.last_name = last_name
-    db.commit()
-
-    return {"success": True}
 
 
 @app.get("/api/owner/{shop_id}/customers")
