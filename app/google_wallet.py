@@ -19,13 +19,9 @@ import uuid
 ISSUER_ID = os.environ.get("GOOGLE_WALLET_ISSUER_ID", "")
 SERVICE_ACCOUNT_FILE = os.path.join(os.path.dirname(__file__), "..", "service-account.json")
 WALLET_ENABLED = bool(ISSUER_ID) and os.path.exists(SERVICE_ACCOUNT_FILE)
+print(f"Google Wallet enabled: {WALLET_ENABLED}")
 
 CLASS_ID = f"{ISSUER_ID}.stampcard_class" if ISSUER_ID else None
-
-print(f"ISSUER_ID: '{ISSUER_ID}'")
-print(f"SERVICE_ACCOUNT_FILE: {SERVICE_ACCOUNT_FILE}")
-print(f"File exists: {os.path.exists(SERVICE_ACCOUNT_FILE)}")
-print(f"WALLET_ENABLED: {WALLET_ENABLED}")
 
 if WALLET_ENABLED:
     from google.oauth2 import service_account
